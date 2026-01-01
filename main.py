@@ -38,7 +38,6 @@ CSS = """
 </style>
 """
 
-# --- 検索処理（JS） ---
 JS = """
 <script>
     function s(type) {
@@ -60,11 +59,8 @@ def index():
 def results(q, t):
     query = de(q)
     if query.startswith(('http://', 'https://')): return redirect(f'/p/{ob(query)}')
-    
-    c_t = "tab active" if t == "text" else "tab"
-    c_i = "tab active" if t == "img" else "tab"
+    c_t, c_i = ("tab active", "tab") if t == "text" else ("tab", "tab active")
     html = f"<html><head>{CSS}{JS}</head><body><div class='header'><a href='/' style='text-decoration:none; font-size:20px; font-weight:bold;'><span style='color:#4285f4'>G</span></a><input type='text' id='q' value='{query}' onkeypress='check(event, \"{t}\")'></div><div class='tabs'><a href='javascript:s(\"text\")' class='{c_t}'>すべて</a><a href='javascript:s(\"img\")' class='{c_i}'>画像</a></div><div class='container'>"
-    
     if t == 'img':
         try:
             r = requests.get(f"https://www.google.com/search?q={query}&tbm=isch", headers={"User-Agent":"Mozilla/5.0"}, timeout=5)
@@ -74,13 +70,13 @@ def results(q, t):
                 src = img.get("src") or img.get("data-src")
                 if src: html += f"<a href='/p/{ob(src)}' target='_blank'><img src='/p/{ob(src)}' loading='lazy'></a>"
             html += "</div>"
-        except: html += "画像の読み込みに失敗しました。"
+        except: html += "Error"
     else:
         try:
             with DDGS() as ddgs:
                 for r in list(ddgs.text(query, max_results=12)):
                     html += f"<div class='res-box'><a href='/p/{ob(r['href'])}'>{r['title']}</a><p>{r['body']}</p></div>"
-        except: html += "結果の取得に失敗しました。"
+        except: html += "Error"
     return html + "</div></body></html>"
 
 @app.route('/p/<u>')
@@ -89,28 +85,19 @@ def proxy(u):
     if not url: return "Invalid URL", 400
     try:
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15, stream=True)
-        ctype = r.headers.get("Content-Type", "")
-
         def generate():
-            if "text/html" in ctype.lower():
+            if "text/html" in r.headers.get("Content-Type", "").lower():
                 soup = BeautifulSoup(r.content, "html.parser")
                 for tag, attr in {'a':'href', 'img':'src', 'link':'href', 'script':'src', 'form':'action'}.items():
                     for el in soup.find_all(tag, **{attr: True}):
-                        full = urllib.parse.urljoin(url, el[attr])
-                        el[attr] = f"/p/{ob(full)}"
-                # 履歴上書きで404回避
-                sc = soup.new_tag('script')
-                sc.string = "window.history.replaceState(null, '', window.location.href);"
-                if soup.head: soup.head.append(sc)
+                        el[attr] = f"/p/{ob(urllib.parse.urljoin(url, el[attr]))}"
                 yield str(soup).encode('utf-8')
             else:
-                for chunk in r.iter_content(chunk_size=16384):
-                    yield chunk
-
-        response = Response(stream_with_context(generate()), content_type=ctype)
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        return response
-    except: return "Proxy Error", 404
+                for chunk in r.iter_content(chunk_size=16384): yield chunk
+        res = Response(stream_with_context(generate()), content_type=r.headers.get("Content-Type"))
+        res.headers["Cache-Control"] = "no-store"
+        return res
+    except: return "Error", 404
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
