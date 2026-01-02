@@ -16,111 +16,177 @@ def de(t):
 
 CSS = """
 <style>
-    :root { --bg: #1a1a1a; --text: #f1f1f1; --accent: #8ab4f8; --card: #303134; }
-    body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; }
-    
-    /* 検索欄とロゴを少し下げる（25vh） */
-    .hero { display: flex; flex-direction: column; align-items: center; padding-top: 25vh; min-height: 75vh; }
-    
-    .logo-container { display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 25px; }
-    .logo-font { font-size: 42px; font-weight: bold; color: var(--accent); }
-    
-    /* GIF画像の設定：背景に馴染ませ、動きを止めない設定 */
-    .char-gif { height: 95px; width: auto; background: transparent; mix-blend-mode: lighten; }
-    
-    .search-box { width: 85%; max-width: 500px; padding: 14px 25px; border-radius: 30px; border: 1px solid #5f6368; background: var(--card); color: white; font-size: 18px; outline: none; }
-    .search-box:focus { border-color: var(--accent); }
+    body { background: #000; color: #fff; font-family: 'Courier New', monospace; margin: 0; overflow: hidden; }
+    .hero { display: flex; flex-direction: column; align-items: center; padding-top: 15vh; }
+    .logo-font { font-size: 35px; margin-top: 15px; font-weight: bold; letter-spacing: 2px; }
+    .char-gif { height: 110px; cursor: pointer; }
+    .search-box { width: 400px; padding: 12px; background: #000; border: 2px solid #fff; color: #fff; margin-top: 20px; outline: none; }
 
-    .header { position: sticky; top: 0; background: var(--bg); padding: 10px; border-bottom: 1px solid #3c4043; display: flex; align-items: center; gap: 15px; }
-    .header img { height: 35px; mix-blend-mode: lighten; }
-    .header input { flex: 1; padding: 8px 15px; border-radius: 20px; border: 1px solid #5f6368; background: var(--card); color: white; outline: none; }
+    /* バトルフィールド */
+    #battle-screen { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 9999; }
+    #field { position: relative; width: 400px; height: 200px; border: 5px solid #fff; margin: 180px auto 0; overflow: hidden; background: #000; }
     
-    .container { max-width: 750px; margin: 20px auto; padding: 0 20px; }
-    .res-box { margin-bottom: 25px; border-bottom: 1px solid #333; padding-bottom: 15px; }
-    .res-box a { color: var(--accent); font-size: 18px; text-decoration: none; font-weight: bold; }
-    .res-box p { color: #bdc1c6; font-size: 14px; margin-top: 8px; line-height: 1.5; }
+    /* ハート（ソウル） */
+    #heart { position: absolute; width: 16px; height: 16px; z-index: 100; transition: background 0.2s; clip-path: polygon(50% 0%, 100% 35%, 80% 100%, 50% 80%, 20% 100%, 0% 35%); }
+    .red { background: #f00; }
+    .blue { background: #00f; }
+
+    /* 攻撃オブジェクト */
+    .bone { position: absolute; background: #fff; z-index: 50; }
+    .blaster-line { position: absolute; background: #fff; height: 2px; opacity: 0.5; z-index: 40; }
+    .blaster-beam { position: absolute; background: #fff; height: 40px; z-index: 60; box-shadow: 0 0 20px #fff; }
+
+    #ui-box { text-align: center; margin-top: 20px; font-size: 20px; }
+    #hp-bar-bg { width: 100px; height: 20px; background: #f00; display: inline-block; vertical-align: middle; margin: 0 10px; }
+    #hp-bar-fg { height: 100%; background: #ff0; width: 100%; }
 </style>
 """
 
 JS = """
 <script>
-    function s() {
-        const q = document.getElementById('q').value;
-        if(!q) return;
-        const b64 = btoa(encodeURIComponent(q).replace(/%([0-9A-F]{2})/g, (m, p) => String.fromCharCode('0x'+p))).replace(/=/g, '');
-        window.location.href = '/s/' + b64;
+    let active = false;
+    let hp = 92, maxHp = 92;
+    let px = 192, py = 100;
+    let vx = 0, vy = 0;
+    let mode = 'red'; // 'red' or 'blue'
+    let keys = {};
+
+    function startBattle() {
+        document.getElementById('battle-screen').style.display = 'block';
+        active = true;
+        gameLoop();
+        attackDirector();
     }
-    function check(e) { if(e.key==='Enter') s(); }
+
+    window.onkeydown = (e) => keys[e.code] = true;
+    window.onkeyup = (e) => keys[e.code] = false;
+
+    function gameLoop() {
+        if(!active) return;
+
+        // 移動ロジック
+        if(mode === 'red') {
+            if(keys['ArrowUp']) py -= 3;
+            if(keys['ArrowDown']) py += 3;
+        } else { // 青モード（重力）
+            vy += 0.2; // 重力
+            py += vy;
+            if(keys['ArrowUp'] && py >= 184) vy = -5; // ジャンプ
+            if(py > 184) { py = 184; vy = 0; }
+        }
+        if(keys['ArrowLeft']) px -= 3;
+        if(keys['ArrowRight']) px += 3;
+
+        px = Math.max(0, Math.min(384, px));
+        py = Math.max(0, Math.min(184, py));
+
+        const h = document.getElementById('heart');
+        h.style.left = px + 'px';
+        h.style.top = py + 'px';
+        h.className = mode;
+
+        checkCollision();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // Scratchのスクリプト順序を再現したディレクター
+    async function attackDirector() {
+        while(active) {
+            let rand = Math.random();
+            if(rand < 0.3) {
+                mode = 'blue';
+                await spawnBonesLower();
+            } else if(rand < 0.6) {
+                mode = 'red';
+                await spawnBlaster();
+            } else {
+                await spawnBonesSlide();
+            }
+            await new Promise(r => setTimeout(r, 1000));
+        }
+    }
+
+    function createBone(x, y, w, h, vx, vy_b) {
+        const b = document.createElement('div');
+        b.className = 'bone';
+        b.style.left = x+'px'; b.style.top = y+'px'; b.style.width = w+'px'; b.style.height = h+'px';
+        document.getElementById('field').appendChild(b);
+        let cx = x, cy = y;
+        const itv = setInterval(() => {
+            cx += vx; cy += vy_b;
+            b.style.left = cx+'px'; b.style.top = cy+'px';
+            if(cx < -50 || cx > 450) { clearInterval(itv); b.remove(); }
+        }, 20);
+    }
+
+    async function spawnBonesLower() {
+        for(let i=0; i<8; i++) {
+            createBone(i*50, 150, 15, 50, 0, 0);
+            await new Promise(r => setTimeout(r, 200));
+        }
+    }
+
+    async function spawnBlaster() {
+        const line = document.createElement('div');
+        line.className = 'blaster-line';
+        line.style.top = py + 8 + 'px'; line.style.width = '400px';
+        document.getElementById('field').appendChild(line);
+        await new Promise(r => setTimeout(r, 600));
+        line.remove();
+        const beam = document.createElement('div');
+        beam.className = 'blaster-beam';
+        beam.style.top = py - 12 + 'px'; beam.style.width = '400px';
+        document.getElementById('field').appendChild(beam);
+        setTimeout(() => beam.remove(), 200);
+    }
+
+    async function spawnBonesSlide() {
+        for(let i=0; i<5; i++) {
+            createBone(400, 100, 20, 100, -5, 0);
+            await new Promise(r => setTimeout(r, 400));
+        }
+    }
+
+    function checkCollision() {
+        const hRect = document.getElementById('heart').getBoundingClientRect();
+        document.querySelectorAll('.bone, .blaster-beam').forEach(t => {
+            const tRect = t.getBoundingClientRect();
+            if(!(hRect.right < tRect.left || hRect.left > tRect.right || hRect.bottom < tRect.top || hRect.top > tRect.bottom)) {
+                hp -= 1;
+                updateHp();
+                if(hp <= 0) location.reload();
+            }
+        });
+    }
+
+    function updateHp() {
+        const p = (hp / maxHp) * 100;
+        document.getElementById('hp-bar-fg').style.width = p + '%';
+        document.getElementById('hp-text').innerText = Math.max(0, Math.ceil(hp));
+    }
 </script>
 """
 
-@app.route('/img/<path:filename>')
-def custom_static(filename):
-    # キャッシュを有効にして、ウサギが止まらないようにする
-    response = send_from_directory(os.getcwd(), filename)
-    response.headers['Cache-Control'] = 'public, max-age=31536000'
-    return response
-
 @app.route('/')
 def index():
-    return f"""<html><head><title>プロキシ.pro</title>{CSS}{JS}</head><body>
-    <div class='hero'>
-        <div class='logo-container'>
-            <img src='/img/cat.gif' class='char-gif'>
-            <div class='logo-font'>プロキシ.pro</div>
-            <img src='/img/rabbit.gif' class='char-gif'>
+    return f"""<html><head><title>猫戦 完全再現</title>{CSS}{JS}</head><body>
+    <div id='battle-screen'>
+        <div style='text-align:center; padding-top:30px;'>
+            <img src='/img/cat.gif' id='boss-cat' style='height:100px;'>
         </div>
-        <input type='text' id='q' class='search-box' onkeypress='check(event)' placeholder='' autofocus>
+        <div id='field'><div id='heart' class='red'></div></div>
+        <div id='ui-box'>
+            PLAYER LV 19 <div id='hp-bar-bg'><div id='hp-bar-fg'></div></div> <span id='hp-text'>92</span> / 92
+        </div>
+    </div>
+    <div class='hero'>
+        <img src='/img/cat.gif' class='char-gif' onclick='startBattle()'>
+        <div class='logo-font'>プロキシ.pro</div>
+        <input type='text' id='q' class='search-box' onkeypress='if(event.key==="Enter") location.href="/s/"+btoa(this.value)' placeholder=''>
     </div></body></html>"""
 
-@app.route('/s/<q>')
-def results(q):
-    query = de(q)
-    if query.startswith(('http://', 'https://')): return redirect(f'/p/{ob(query)}')
-    
-    html = f"<html><head><title>{query} - プロキシ.pro</title>{CSS}{JS}</head><body>"
-    html += f"<div class='header'><a href='/'><img src='/img/cat.gif'></a><input type='text' id='q' value='{query}' onkeypress='check(event)'></div>"
-    html += "<div class='container'>"
-    
-    try:
-        # DuckDuckGo HTML版（エラーが少ない）を使用
-        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        soup = BeautifulSoup(r.text, 'html.parser')
-        
-        for res in soup.select('.result'):
-            t_tag = res.select_one('.result__a')
-            s_tag = res.select_one('.result__snippet')
-            if t_tag:
-                title = t_tag.text
-                link = t_tag['href']
-                snippet = s_tag.text if s_tag else ""
-                # DuckDuckGoの外部リダイレクトURLを解除する処理
-                if "uddg=" in link:
-                    link = urllib.parse.unquote(link.split("uddg=")[1].split("&")[0])
-                html += f"<div class='res-box'><a href='/p/{ob(link)}'>{title}</a><p>{snippet}</p></div>"
-    except Exception as e:
-        html += f"<p>Error: {str(e)}</p>"
-    
-    return html + "</div></body></html>"
-
-@app.route('/p/<u>')
-def proxy(u):
-    url = de(u)
-    try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10, stream=True)
-        def generate():
-            if "text/html" in r.headers.get("Content-Type", "").lower():
-                soup = BeautifulSoup(r.content, "html.parser")
-                for tag, attr in {'a':'href', 'img':'src', 'link':'href', 'script':'src'}.items():
-                    for el in soup.find_all(tag, **{attr: True}):
-                        el[attr] = f"/p/{ob(urllib.parse.urljoin(url, el[attr]))}"
-                yield str(soup).encode('utf-8')
-            else:
-                for chunk in r.iter_content(chunk_size=8192): yield chunk
-        return Response(stream_with_context(generate()), content_type=r.headers.get("Content-Type"))
-    except: return "Proxy Error", 404
+@app.route('/img/<path:f>')
+def static_img(f): return send_from_directory(os.getcwd(), f)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
